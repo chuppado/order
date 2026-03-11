@@ -1,0 +1,907 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Kitchen Stock</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+    body { font-family: 'Segoe UI', Tahoma, sans-serif; background: #EDEDED; min-height: 100vh; }
+    table { border-collapse: collapse; }
+    input, button, select { font-family: inherit; }
+    ::-webkit-scrollbar { height: 4px; width: 4px; }
+    ::-webkit-scrollbar-thumb { background: #ccc; border-radius: 4px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid rgba(255,255,255,0.4); border-top-color: #fff; border-radius: 50%; animation: spin 0.7s linear infinite; }
+    input[type=number]::-webkit-inner-spin-button,
+    input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+    input[type=number] { -moz-appearance: textfield; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useMemo, useRef, useEffect } = React;
+
+    // ── Column colour palette — mirrors DAY_COLORS exactly ────────────────────
+    const COL_COLORS = {
+      stock:  { bg: "#FFD966", text: "#5a3e00" },   // MON yellow
+      min:    { bg: "#70AD47", text: "#fff"     },   // WED green
+      status: { bg: "#4BACC6", text: "#fff"     },   // THU cyan
+      order:  { bg: "#7030A0", text: "#fff"     },   // SAT purple
+    };
+
+    // Section header colours — mirrors BOH / FOH row style
+    const SEC_COLORS = {
+      vegetable: { bg: "#E2EFDA", text: "#375623", border: "#70AD47" },
+      meat:      { bg: "#FCE4D6", text: "#833C0B", border: "#FF6B35" },
+      other:     { bg: "#DAE3F3", text: "#1F3864", border: "#4472C4" },
+    };
+
+    const SECTIONS = [
+      { id: "vegetable", label: "🥬 Vegetables" },
+      { id: "meat",      label: "🥩 Meat & Seafood" },
+      { id: "other",     label: "🧴 Seasoning & Other" },
+    ];
+
+    const STATUS_CFG = {
+      ok:  { bg: "#E8F5E9", color: "#276749", label: "OK"  },
+      low: { bg: "#FFF8E1", color: "#B45309", label: "Low" },
+      out: { bg: "#FFEBEE", color: "#C53030", label: "Out" },
+    };
+
+    function statusOf(item) {
+      if (item.stock <= 0) return "out";
+      if (item.stock < item.min) return "low";
+      return "ok";
+    }
+
+    // ── Initial data ──────────────────────────────────────────────────────────
+    const INITIAL_ITEMS = [
+      { id:"v1",  sec:"vegetable", name:"Morning glory",     unit:"kg",     stock:2,   min:1   },
+      { id:"v2",  sec:"vegetable", name:"Chinese broccoli",  unit:"kg",     stock:0.5, min:1   },
+      { id:"v3",  sec:"vegetable", name:"Cabbage",           unit:"kg",     stock:3,   min:2   },
+      { id:"v4",  sec:"vegetable", name:"Carrot",            unit:"kg",     stock:1,   min:1.5 },
+      { id:"v5",  sec:"vegetable", name:"Onion",             unit:"kg",     stock:4,   min:2   },
+      { id:"v6",  sec:"vegetable", name:"Garlic",            unit:"kg",     stock:0,   min:0.5 },
+      { id:"v7",  sec:"vegetable", name:"Tomato",            unit:"kg",     stock:2,   min:1   },
+      { id:"v8",  sec:"vegetable", name:"Fresh chilli",      unit:"kg",     stock:0.3, min:0.5 },
+      { id:"v9",  sec:"vegetable", name:"Thai basil",        unit:"bunch",  stock:5,   min:3   },
+      { id:"v10", sec:"vegetable", name:"Spring onion",      unit:"bunch",  stock:2,   min:4   },
+      { id:"m1",  sec:"meat",      name:"Minced pork",       unit:"kg",     stock:3,   min:2   },
+      { id:"m2",  sec:"meat",      name:"Pork belly",        unit:"kg",     stock:1,   min:2   },
+      { id:"m3",  sec:"meat",      name:"Whole chicken",     unit:"kg",     stock:5,   min:3   },
+      { id:"m4",  sec:"meat",      name:"Chicken breast",    unit:"kg",     stock:0,   min:2   },
+      { id:"m5",  sec:"meat",      name:"Minced beef",       unit:"kg",     stock:2,   min:1   },
+      { id:"m6",  sec:"meat",      name:"Fresh shrimp",      unit:"kg",     stock:1.5, min:2   },
+      { id:"m7",  sec:"meat",      name:"Squid",             unit:"kg",     stock:2,   min:1   },
+      { id:"m8",  sec:"meat",      name:"Eggs",              unit:"tray",   stock:1,   min:2   },
+      { id:"o1",  sec:"other",     name:"Vegetable oil",     unit:"litre",  stock:3,   min:2   },
+      { id:"o2",  sec:"other",     name:"Light soy sauce",   unit:"bottle", stock:2,   min:1   },
+      { id:"o3",  sec:"other",     name:"Fish sauce",        unit:"bottle", stock:1,   min:2   },
+      { id:"o4",  sec:"other",     name:"Corn starch",       unit:"kg",     stock:0.5, min:0.5 },
+    ].map(i => ({ ...i, orderQty: 0 }));
+
+    const TABS = [
+      { id: "stock",   label: "Stock"      },
+      { id: "order",   label: "Order List" },
+      { id: "history", label: "History"    },
+    ];
+
+    const SK = "kitchen_stock_v4";
+    const HK = "kitchen_history_v4";
+    const TK = "kitchen_title_v4";
+    function ls(key, fb) { try { const s=localStorage.getItem(key); if(s) return JSON.parse(s); } catch(e){} return fb; }
+    function ss(key,val) { try { localStorage.setItem(key,JSON.stringify(val)); } catch(e){} }
+
+    function fmtDate(ts) {
+      const d=new Date(ts);
+      return `${d.getDate()}/${d.getMonth()+1}/${String(d.getFullYear()).slice(-2)} `
+           + `${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;
+    }
+
+    // ── Shared style tokens — identical to scheduler ───────────────────────────
+    const iStyle     = { width:"100%", padding:"11px 13px", borderRadius:10, border:"1.5px solid #E5E7EB", fontSize:15, boxSizing:"border-box" };
+    const primaryBtn = { flex:1, padding:"12px", borderRadius:12, border:"none", background:"#1a1a2e", color:"#fff", fontWeight:700, cursor:"pointer", fontSize:14 };
+    const cancelBtn  = { flex:1, padding:"12px", borderRadius:12, border:"1.5px solid #E5E7EB", background:"#fff", color:"#555", fontWeight:600, cursor:"pointer", fontSize:14 };
+    const dangerBtn  = { width:"100%", padding:"12px", borderRadius:12, border:"none", background:"#FEF2F2", color:"#E53E3E", fontWeight:700, cursor:"pointer", fontSize:14, marginBottom:8 };
+
+    // ── Modal — identical to scheduler ────────────────────────────────────────
+    function Modal({ children, onClose }) {
+      return (
+        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.45)", display:"flex",
+          alignItems:"flex-end", justifyContent:"center", zIndex:500, padding:16 }}
+          onClick={e => e.target === e.currentTarget && onClose()}>
+          <div style={{ background:"#fff", borderRadius:20, padding:24, width:"100%", maxWidth:430,
+            maxHeight:"82vh", overflowY:"auto" }}>
+            {children}
+          </div>
+        </div>
+      );
+    }
+
+    // ── InlineEdit — local state for edit modal ────────────────────────────────
+    function EditItemModal({ item, onSave, onDelete, onClose }) {
+      const [d, setD] = useState({ ...item });
+      return (
+        <Modal onClose={onClose}>
+          <div style={{ fontWeight:700, fontSize:16, marginBottom:14 }}>✏️ Edit: {item.name}</div>
+          <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+            <div>
+              <div style={{ fontSize:12, color:"#888", marginBottom:4 }}>Item name</div>
+              <input style={iStyle} value={d.name} onChange={e=>setD({...d,name:e.target.value})} />
+            </div>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
+              <div>
+                <div style={{ fontSize:12, color:"#888", marginBottom:4 }}>หน่วย</div>
+                <input style={iStyle} value={d.unit} onChange={e=>setD({...d,unit:e.target.value})} />
+              </div>
+              <div>
+                <div style={{ fontSize:12, color:"#888", marginBottom:4 }}>Category</div>
+                <select style={iStyle} value={d.sec} onChange={e=>setD({...d,sec:e.target.value})}>
+                  <option value="vegetable">🥬 Vegetables</option>
+                  <option value="meat">🥩 Meat & Seafood</option>
+                  <option value="other">🧴 Other</option>
+                </select>
+              </div>
+            </div>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
+              <div>
+                <div style={{ fontSize:12, color:"#888", marginBottom:4 }}>Current stock</div>
+                <input style={iStyle} type="number" step="0.5" min="0" value={d.stock}
+                  onChange={e=>setD({...d,stock:parseFloat(e.target.value)||0})} />
+              </div>
+              <div>
+                <div style={{ fontSize:12, color:"#888", marginBottom:4 }}>Min level</div>
+                <input style={iStyle} type="number" step="0.5" min="0" value={d.min}
+                  onChange={e=>setD({...d,min:parseFloat(e.target.value)||0})} />
+              </div>
+            </div>
+            <button onClick={() => onDelete(item.id)} style={dangerBtn}>🗑 Delete item</button>
+            <div style={{ display:"flex", gap:8 }}>
+              <button onClick={onClose} style={cancelBtn}>Cancel</button>
+              <button onClick={() => onSave(d)} style={primaryBtn}>💾 Save</button>
+            </div>
+          </div>
+        </Modal>
+      );
+    }
+
+    // ── App ────────────────────────────────────────────────────────────────────
+    function App() {
+      const [items,   setItems]   = useState(() => ls(SK, INITIAL_ITEMS));
+      const [history, setHistory] = useState(() => ls(HK, []));
+      const [title,   setTitle]   = useState(() => ls(TK, "Kitchen Stock"));
+      const [activeTab, setActiveTab] = useState("stock");
+
+      // Modals
+      const [editId,         setEditId]         = useState(null);
+      const [addSec,         setAddSec]         = useState(null);
+      const [confirmReset,   setConfirmReset]   = useState(false);
+      const [confirmReceive, setConfirmReceive] = useState(false);
+      const [confirmClear,   setConfirmClear]   = useState(false);
+      const [editTitleOpen,  setEditTitleOpen]  = useState(false);
+      const [tempTitle,      setTempTitle]      = useState("");
+
+      // Add-item form state
+      const [newName,  setNewName]  = useState("");
+      const [newUnit,  setNewUnit]  = useState("กก.");
+      const [newStock, setNewStock] = useState("");
+      const [newMin,   setNewMin]   = useState("");
+
+      const [toast,   setToast]   = useState(null);
+      const [sharing, setSharing] = useState(false);
+
+      useEffect(() => { ss(SK, items);   }, [items]);
+      useEffect(() => { ss(HK, history); }, [history]);
+      useEffect(() => { ss(TK, title);   }, [title]);
+
+      const showToast = (msg, type="ok") => { setToast({msg,type}); setTimeout(()=>setToast(null), 3000); };
+
+      const editItem   = useMemo(() => items.find(i=>i.id===editId)||null, [items, editId]);
+      const orderItems = useMemo(() => items.filter(i=>i.orderQty>0), [items]);
+      const alertCount = useMemo(() => items.filter(i=>statusOf(i)!=="ok").length, [items]);
+
+      // ── Actions ──────────────────────────────────────────────────────────────
+      const adjStock = (id, delta) =>
+        setItems(p => p.map(i => i.id!==id ? i :
+          { ...i, stock: Math.max(0, parseFloat((i.stock+delta).toFixed(1))) }));
+
+      const adjOrder = (id, delta) =>
+        setItems(p => p.map(i => i.id!==id ? i :
+          { ...i, orderQty: Math.max(0, parseFloat((i.orderQty+delta).toFixed(1))) }));
+
+      const toggleOrder = (id) => {
+        const item = items.find(i=>i.id===id);
+        if (!item) return;
+        const next = item.orderQty>0 ? 0 : Math.max(0.5, parseFloat((item.min-item.stock+0.5).toFixed(1)));
+        setItems(p => p.map(i => i.id!==id ? i : { ...i, orderQty:next }));
+      };
+
+      const autoFill = () => {
+        let n=0;
+        setItems(p => p.map(i => {
+          if (statusOf(i)!=="ok" && i.orderQty===0) {
+            n++;
+            return { ...i, orderQty: Math.max(0.5, parseFloat((i.min-i.stock+0.5).toFixed(1))) };
+          }
+          return i;
+        }));
+        showToast(`⚡ ${n} items auto-added to order list`);
+        setActiveTab("order");
+      };
+
+      const receiveOrder = () => {
+        const log = { id:Date.now(), ts:Date.now(),
+          rows: orderItems.map(i=>({ name:i.name, qty:i.orderQty, unit:i.unit })) };
+        setItems(p => p.map(i => i.orderQty===0 ? i :
+          { ...i, stock: parseFloat((i.stock+i.orderQty).toFixed(1)), orderQty:0 }));
+        setHistory(p => [log,...p].slice(0,80));
+        setConfirmReceive(false);
+        showToast(`✅ ${log.rows.length} items received into stock!`);
+        setActiveTab("stock");
+      };
+
+      const clearOrder = () => {
+        setItems(p => p.map(i => ({ ...i, orderQty:0 })));
+        setConfirmClear(false);
+        showToast("Order list cleared");
+      };
+
+      const saveEdit = (updated) => {
+        setItems(p => p.map(i => i.id!==updated.id ? i : { ...updated, orderQty:i.orderQty }));
+        setEditId(null);
+        showToast(`${updated.name} saved!`);
+      };
+
+      const deleteItem = (id) => {
+        const name = items.find(i=>i.id===id)?.name;
+        setItems(p => p.filter(i=>i.id!==id));
+        setEditId(null);
+        showToast(`${name} deleted!`);
+      };
+
+      const addItem = () => {
+        if (!newName.trim() || !addSec) return;
+        const ni = { id:"i"+Date.now(), sec:addSec, name:newName.trim(),
+          unit:newUnit||"กก.", stock:parseFloat(newStock)||0,
+          min:parseFloat(newMin)||1, orderQty:0 };
+        setItems(p => [...p, ni]);
+        setNewName(""); setNewStock(""); setNewMin(""); setAddSec(null);
+        showToast(`${ni.name} added!`);
+      };
+
+      const resetAll = () => {
+        setItems(INITIAL_ITEMS); setHistory([]); setTitle("Kitchen Stock");
+        [SK,HK,TK].forEach(k=>localStorage.removeItem(k));
+        setConfirmReset(false); setActiveTab("stock");
+        showToast("Reset to blank template!");
+      };
+
+      // ── Build order text ─────────────────────────────────────────────────────
+      const buildOrderText = () => {
+        const date = new Date().toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"});
+        let lines = [`📋 Order List — ${date}`, ""];
+        SECTIONS.forEach(sec => {
+          const rows = orderItems.filter(i=>i.sec===sec.id);
+          if (!rows.length) return;
+          lines.push(sec.label);
+          rows.forEach(i => lines.push(`• ${i.name}  ${i.orderQty} ${i.unit}`));
+          lines.push("");
+        });
+        return lines.join("\n").trim();
+      };
+
+      // ── Share ─────────────────────────────────────────────────────────────────
+      const [shareModal, setShareModal] = useState(false);
+
+      const handleShare = async () => {
+        // Mobile: native share sheet
+        if (navigator.share) {
+          try { await navigator.share({ title:"Order List", text: buildOrderText() }); return; }
+          catch(e) { if (e.name === "AbortError") return; }
+        }
+        // Desktop: copy + popup
+        try {
+          await navigator.clipboard.writeText(buildOrderText());
+          setShareModal(true);
+        } catch(e) {
+          showToast("Could not copy text","err");
+        }
+      };
+
+      // ── Column config ──────────────────────────────────────────────────────
+      const NAME_W = 82;
+      const CELL_W = 52;
+      const COLS   = [
+        { key:"stock",  label:"Stock"  },
+        { key:"min",    label:"Min"    },
+        { key:"status", label:"Status" },
+        { key:"order",  label:"Order"  },
+      ];
+      const TABLE_W = NAME_W + COLS.length * CELL_W;
+
+      // ── RENDER ────────────────────────────────────────────────────────────────
+      return (
+        <div style={{ fontFamily:"'Segoe UI', Tahoma, sans-serif", background:"#EDEDED", minHeight:"100vh" }}>
+
+          {/* ── Nav bar — identical markup to scheduler ── */}
+          <div style={{ background:"#1a1a2e", padding:"10px 12px", display:"flex", alignItems:"center",
+            gap:8, flexWrap:"wrap", position:"sticky", top:0, zIndex:100 }}>
+            <span style={{ color:"#fff", fontWeight:800, fontSize:13, letterSpacing:1, marginRight:4 }}>🧑‍🍳 KITCHEN STOCK</span>
+
+            {TABS.map(t => (
+              <button key={t.id} onClick={() => setActiveTab(t.id)} style={{
+                padding:"5px 14px", borderRadius:20, border:"none", cursor:"pointer",
+                fontWeight:700, fontSize:12, position:"relative",
+                background: activeTab===t.id ? "#7C3AED" : "rgba(255,255,255,0.12)", color:"#fff",
+                boxShadow: activeTab===t.id ? "0 2px 8px rgba(124,58,237,0.5)" : "none"
+              }}>
+                {t.label}
+                {t.id==="order" && orderItems.length>0 && (
+                  <span style={{ position:"absolute", top:-5, right:-4, background:"#EF4444",
+                    color:"#fff", fontSize:9, fontWeight:800, width:16, height:16, borderRadius:"50%",
+                    display:"flex", alignItems:"center", justifyContent:"center" }}>
+                    {orderItems.length}
+                  </span>
+                )}
+              </button>
+            ))}
+
+            <div style={{ marginLeft:"auto", display:"flex", alignItems:"center", gap:8 }}>
+              <span style={{ fontSize:10, color:"#6EE7B7", fontWeight:700 }}>💾 Auto-saved</span>
+              {activeTab==="order" && orderItems.length>0 && (
+                <button onClick={handleShare}
+                  style={{ padding:"5px 12px", borderRadius:20, border:"none", background:"#059669",
+                    color:"#fff", fontWeight:700, cursor:"pointer", fontSize:12,
+                    display:"flex", alignItems:"center", gap:6 }}>
+                  📤 Share
+                </button>
+              )}
+              <button onClick={() => setConfirmReset(true)}
+                style={{ padding:"4px 10px", borderRadius:20, border:"1px solid rgba(255,100,100,0.4)",
+                  background:"none", color:"rgba(255,150,150,0.8)", cursor:"pointer", fontSize:11 }}>Reset</button>
+            </div>
+          </div>
+
+          {/* ── Info banner — mirrors cross-outlet link banner ── */}
+          <div style={{ background:"#FFF9E6", borderBottom:"2px solid #FCD34D", padding:"6px 14px",
+            display:"flex", alignItems:"center", gap:10, flexWrap:"wrap" }}>
+            {alertCount > 0 ? (
+              <>
+                <span style={{ fontSize:11, fontWeight:800, color:"#92400E" }}>⚠️ {alertCount} items need attention</span>
+                <button onClick={autoFill} style={{ fontSize:11, fontWeight:700, color:"#7C3AED",
+                  background:"none", border:"1px solid #C4B5FD", borderRadius:20, padding:"2px 10px", cursor:"pointer" }}>
+                  ⚡ Auto-fill order
+                </button>
+                <span style={{ marginLeft:"auto", fontSize:11, color:"#B45309" }}>Tap name to edit · Tap ± to update stock</span>
+              </>
+            ) : (
+              <>
+                <span style={{ fontSize:11, fontWeight:800, color:"#276749" }}>✅ All stock levels OK</span>
+                <span style={{ fontSize:11, color:"#6B7280" }}>Tap name to edit · Tap ± to update stock</span>
+              </>
+            )}
+            <span onClick={() => { setTempTitle(title); setEditTitleOpen(true); }}
+              style={{ fontSize:11, color:"#7C3AED", cursor:"pointer", marginLeft:8 }}>✏️ {title}</span>
+          </div>
+
+          {/* ══════════ STOCK TABLE ══════════ */}
+          {activeTab==="stock" && (
+            <div style={{ overflowX:"auto", padding:"10px 8px 30px" }}>
+              <div style={{ display:"inline-block", background:"#fff", padding:8, borderRadius:4 }}>
+                <table style={{ borderCollapse:"collapse", tableLayout:"fixed", minWidth:TABLE_W }}>
+                  <colgroup>
+                    <col style={{ width:NAME_W }}/>
+                    {COLS.map(c => <col key={c.key} style={{ width:CELL_W }}/>)}
+                  </colgroup>
+                  <thead>
+                    {/* Red title row — same as scheduler */}
+                    <tr>
+                      <td colSpan={1+COLS.length} style={{ background:"#C00000", color:"#fff",
+                        textAlign:"center", fontWeight:800, fontSize:13, padding:"6px 8px",
+                        border:"1px solid #aaa" }}>
+                        📋 {title}
+                      </td>
+                    </tr>
+                    {/* Coloured column headers — same style as day headers */}
+                    <tr>
+                      <td style={{ border:"1px solid #ccc", background:"#F0F0F0", fontSize:10,
+                        fontWeight:700, textAlign:"center", color:"#666", padding:"3px 2px" }}>Item</td>
+                      {COLS.map(c => (
+                        <td key={c.key} style={{ background:COL_COLORS[c.key].bg,
+                          color:COL_COLORS[c.key].text, textAlign:"center", fontWeight:800,
+                          fontSize:11, border:"1px solid #999", padding:"5px 2px" }}>
+                          {c.label}
+                        </td>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {SECTIONS.map(sec => {
+                      const secItems = items.filter(i=>i.sec===sec.id);
+                      const sc = SEC_COLORS[sec.id];
+                      return (
+                        <React.Fragment key={sec.id}>
+                          {/* Section header — identical style to BOH / FOH */}
+                          <tr>
+                            <td colSpan={1+COLS.length} style={{ background:sc.bg, fontWeight:800,
+                              fontSize:12, padding:"4px 8px", color:sc.text,
+                              border:`1px solid ${sc.border}`, borderLeft:`3px solid ${sc.border}` }}>
+                              {sec.label}
+                            </td>
+                          </tr>
+
+                          {/* Item rows */}
+                          {secItems.map((item, pi) => {
+                            const st = statusOf(item);
+                            const ss = STATUS_CFG[st];
+                            return (
+                              <tr key={item.id} style={{ background: pi%2===0 ? "#fff" : "#F9F9F9" }}>
+                                {/* Name cell — tap to edit, identical to person cell */}
+                                <td onClick={() => setEditId(item.id)}
+                                  style={{ fontWeight:700, fontSize:11, padding:"4px 5px",
+                                    border:"1px solid #ddd", whiteSpace:"nowrap", overflow:"hidden",
+                                    textOverflow:"ellipsis", cursor:"pointer", color:"#1a1a2e",
+                                    maxWidth:NAME_W }} title={item.name}>
+                                  {item.name}
+                                </td>
+
+                                {/* Stock cell with ±0.5 steppers */}
+                                <td style={{ border:"1px solid #ddd", padding:"2px 1px",
+                                  background: st==="out"?"#FFEBEE": st==="low"?"#FFF8E1":"#fff" }}>
+                                  <div style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:1 }}>
+                                    <button onClick={() => adjStock(item.id,-0.5)}
+                                      style={{ width:18, height:18, border:"none", background:"#EEE",
+                                        borderRadius:3, cursor:"pointer", fontSize:13, fontWeight:800,
+                                        color:"#666", lineHeight:1, padding:0, display:"flex",
+                                        alignItems:"center", justifyContent:"center" }}>−</button>
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      step="0.5"
+                                      value={item.stock}
+                                      onChange={e => {
+                                        const v = parseFloat(e.target.value);
+                                        setItems(p => p.map(i => i.id!==item.id ? i :
+                                          { ...i, stock: isNaN(v) ? 0 : Math.max(0, v) }));
+                                      }}
+                                      style={{ width:32, border:"none", background:"transparent",
+                                        textAlign:"center", fontSize:11, fontWeight:800, outline:"none",
+                                        padding:0, MozAppearance:"textfield",
+                                        color: st==="out"?"#C53030": st==="low"?"#B45309":"#276749" }}
+                                    />
+                                    <button onClick={() => adjStock(item.id,+0.5)}
+                                      style={{ width:18, height:18, border:"none", background:"#E8F5E9",
+                                        borderRadius:3, cursor:"pointer", fontSize:13, fontWeight:800,
+                                        color:"#276749", lineHeight:1, padding:0, display:"flex",
+                                        alignItems:"center", justifyContent:"center" }}>+</button>
+                                  </div>
+                                  <input
+                                    value={item.unit}
+                                    onChange={e => setItems(p => p.map(i => i.id!==item.id ? i : {...i, unit:e.target.value}))}
+                                    style={{ display:"block", width:"100%", border:"none", background:"transparent",
+                                      textAlign:"center", fontSize:8, color:"#888", outline:"none", padding:0,
+                                      cursor:"text" }}
+                                    title="Click to edit unit"
+                                  />
+                                </td>
+
+                                {/* Min cell */}
+                                <td style={{ textAlign:"center", border:"1px solid #ddd",
+                                  fontSize:11, color:"#555", padding:"3px 1px" }}>
+                                  {item.min}
+                                  <div style={{ fontSize:8, color:"#AAA" }}>{item.unit}</div>
+                                </td>
+
+                                {/* Status cell — mirrors x/Off/? coloured cells */}
+                                <td style={{ textAlign:"center", border:"1px solid #ddd",
+                                  background:ss.bg, color:ss.color, fontSize:10,
+                                  fontWeight:800, padding:"3px 1px" }}>
+                                  {ss.label}
+                                </td>
+
+                                {/* Order cell — inline editable number input */}
+                                <td style={{ border:"1px solid #ddd", padding:"2px 1px",
+                                  background: item.orderQty>0 ? "#EDE9FE" : "#fff" }}>
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    step="0.5"
+                                    value={item.orderQty === 0 ? "" : item.orderQty}
+                                    placeholder="0"
+                                    onChange={e => {
+                                      const v = parseFloat(e.target.value);
+                                      setItems(p => p.map(i => i.id!==item.id ? i :
+                                        { ...i, orderQty: isNaN(v) ? 0 : Math.max(0, v) }));
+                                    }}
+                                    style={{
+                                      width:"100%", border:"none", background:"transparent",
+                                      textAlign:"center", fontSize:11, fontWeight:800,
+                                      color: item.orderQty>0 ? "#6D28D9" : "#AAA",
+                                      outline:"none", padding:"4px 0",
+                                      MozAppearance:"textfield",
+                                    }}
+                                  />
+                                  <div style={{ textAlign:"center", fontSize:8,
+                                    color: item.orderQty>0 ? "#9370DB" : "#DDD" }}>
+                                    {item.orderQty>0 ? item.unit : "type"}
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+
+                          {/* + Add row — mirrors "+ Add to BOH" */}
+                          <tr>
+                            <td colSpan={1+COLS.length}
+                              onClick={() => { setAddSec(sec.id); setNewName(""); setNewUnit("กก."); setNewStock(""); setNewMin(""); }}
+                              style={{ textAlign:"left", padding:"3px 8px", border:"1px solid #eee",
+                                color:"#aaa", fontSize:10, cursor:"pointer", background:"#FAFAFA",
+                                fontStyle:"italic" }}>
+                              + Add to {sec.label}
+                            </td>
+                          </tr>
+                          <tr>
+                            <td colSpan={1+COLS.length} style={{ height:8, border:"none", background:"transparent" }}/>
+                          </tr>
+                        </React.Fragment>
+                      );
+                    })}
+                  </tbody>
+                </table>
+
+                {/* Legend — same position/style as scheduler legend */}
+                <div style={{ display:"flex", gap:10, marginTop:10, flexWrap:"wrap", padding:"0 2px" }}>
+                  {[
+                    { bg:"#E8F5E9", color:"#276749", label:"พอ",   desc:"Stock is sufficient" },
+                    { bg:"#FFF8E1", color:"#B45309", label:"ต่ำ",  desc:"Below minimum" },
+                    { bg:"#FFEBEE", color:"#C53030", label:"หมด", desc:"Out of stock" },
+                    { bg:"#EDE9FE", color:"#6D28D9", label:"+qty", desc:"In order list" },
+                  ].map(l => (
+                    <div key={l.label} style={{ display:"flex", alignItems:"center", gap:5 }}>
+                      <div style={{ minWidth:36, height:18, background:l.bg, border:"1px solid #ddd",
+                        borderRadius:3, display:"flex", alignItems:"center", justifyContent:"center",
+                        color:l.color, fontWeight:700, fontSize:9 }}>{l.label}</div>
+                      <span style={{ fontSize:10, color:"#666" }}>{l.desc}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ══════════ ORDER TABLE ══════════ */}
+          {activeTab==="order" && (
+            <div style={{ overflowX:"auto", padding:"10px 8px 30px" }}>
+              {orderItems.length === 0 ? (
+                <div style={{ textAlign:"center", padding:"60px 20px", color:"#AAA" }}>
+                  <div style={{ fontSize:48, marginBottom:12 }}>🛒</div>
+                  <div style={{ fontWeight:700, fontSize:16, color:"#888", marginBottom:8 }}>No items in order list yet</div>
+                  <div style={{ fontSize:13, marginBottom:24 }}>Go to Stock tab and type a quantity in the Order column, or</div>
+                  {alertCount>0 && (
+                    <button onClick={autoFill}
+                      style={{ ...primaryBtn, maxWidth:260, margin:"0 auto", display:"block", borderRadius:20, background:"#7C3AED" }}>
+                      ⚡ Auto-add low items ({alertCount})
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <div style={{ display:"inline-block", background:"#fff", padding:8, borderRadius:4 }}>
+                  <table style={{ borderCollapse:"collapse", tableLayout:"fixed", minWidth:TABLE_W+20 }}>
+                    <colgroup>
+                      <col style={{ width:NAME_W }}/>
+                      <col style={{ width:CELL_W+20 }}/>
+                      <col style={{ width:CELL_W }}/>
+                      <col style={{ width:CELL_W }}/>
+                      <col style={{ width:CELL_W }}/>
+                    </colgroup>
+                    <thead>
+                      <tr>
+                        <td colSpan={5} style={{ background:"#C00000", color:"#fff",
+                          textAlign:"center", fontWeight:800, fontSize:13, padding:"6px 8px",
+                          border:"1px solid #aaa" }}>
+                          🛒 Order List — {new Date().toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"2-digit"})}
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style={{ border:"1px solid #ccc", background:"#F0F0F0", fontSize:10,
+                          fontWeight:700, textAlign:"center", color:"#666", padding:"3px 2px" }}>Item</td>
+                        <td style={{ background:COL_COLORS.order.bg, color:COL_COLORS.order.text,
+                          textAlign:"center", fontWeight:800, fontSize:11, border:"1px solid #999", padding:"5px 2px" }}>
+                          Order qty
+                        </td>
+                        <td style={{ background:COL_COLORS.stock.bg, color:COL_COLORS.stock.text,
+                          textAlign:"center", fontWeight:800, fontSize:11, border:"1px solid #999", padding:"5px 2px" }}>
+                          Stock
+                        </td>
+                        <td style={{ background:COL_COLORS.min.bg, color:COL_COLORS.min.text,
+                          textAlign:"center", fontWeight:800, fontSize:11, border:"1px solid #999", padding:"5px 2px" }}>
+                          Min
+                        </td>
+                        <td style={{ background:COL_COLORS.status.bg, color:COL_COLORS.status.text,
+                          textAlign:"center", fontWeight:800, fontSize:11, border:"1px solid #999", padding:"5px 2px" }}>
+                          Status
+                        </td>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {SECTIONS.map(sec => {
+                        const rows = orderItems.filter(i=>i.sec===sec.id);
+                        if (!rows.length) return null;
+                        const sc = SEC_COLORS[sec.id];
+                        return (
+                          <React.Fragment key={sec.id}>
+                            <tr>
+                              <td colSpan={5} style={{ background:sc.bg, fontWeight:800, fontSize:12,
+                                padding:"4px 8px", color:sc.text, border:`1px solid ${sc.border}`,
+                                borderLeft:`3px solid ${sc.border}` }}>
+                                {sec.label}
+                              </td>
+                            </tr>
+                            {rows.map((item, pi) => {
+                              const st = statusOf(item);
+                              const ss = STATUS_CFG[st];
+                              return (
+                                <tr key={item.id} style={{ background:pi%2===0?"#fff":"#F9F9F9" }}>
+                                  <td style={{ fontWeight:700, fontSize:11, padding:"4px 5px",
+                                    border:"1px solid #ddd", overflow:"hidden", textOverflow:"ellipsis",
+                                    whiteSpace:"nowrap", color:"#1a1a2e" }}>{item.name}</td>
+                                  {/* Order qty with stepper */}
+                                  <td style={{ border:"1px solid #ddd", padding:"2px 1px", background:"#EDE9FE" }}>
+                                    <div style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:1 }}>
+                                      <button onClick={() => adjOrder(item.id,-0.5)}
+                                        style={{ width:18, height:18, border:"none", background:"#DDD6FE",
+                                          borderRadius:3, cursor:"pointer", fontSize:13, fontWeight:800,
+                                          color:"#6D28D9", lineHeight:1, padding:0, display:"flex",
+                                          alignItems:"center", justifyContent:"center" }}>−</button>
+                                      <span style={{ fontSize:11, fontWeight:800, minWidth:24, textAlign:"center", color:"#6D28D9" }}>
+                                        {item.orderQty}
+                                      </span>
+                                      <button onClick={() => adjOrder(item.id,+0.5)}
+                                        style={{ width:18, height:18, border:"none", background:"#C4B5FD",
+                                          borderRadius:3, cursor:"pointer", fontSize:13, fontWeight:800,
+                                          color:"#6D28D9", lineHeight:1, padding:0, display:"flex",
+                                          alignItems:"center", justifyContent:"center" }}>+</button>
+                                    </div>
+                                    <div style={{ textAlign:"center", fontSize:8, color:"#9370DB" }}>{item.unit}</div>
+                                  </td>
+                                  <td style={{ textAlign:"center", border:"1px solid #ddd", fontSize:11,
+                                    color: st==="out"?"#C53030":st==="low"?"#B45309":"#276749",
+                                    fontWeight:700, padding:"3px 1px" }}>{item.stock}</td>
+                                  <td style={{ textAlign:"center", border:"1px solid #ddd", fontSize:11,
+                                    color:"#555", padding:"3px 1px" }}>{item.min}</td>
+                                  <td style={{ textAlign:"center", border:"1px solid #ddd",
+                                    background:ss.bg, color:ss.color, fontSize:10,
+                                    fontWeight:800, padding:"3px 1px" }}>{ss.label}</td>
+                                </tr>
+                              );
+                            })}
+                            <tr><td colSpan={5} style={{ height:6, border:"none", background:"transparent" }}/></tr>
+                          </React.Fragment>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+
+                  <div style={{ display:"flex", gap:8, marginTop:12 }}>
+                    <button onClick={() => setConfirmReceive(true)} style={{ ...primaryBtn, background:"#276749" }}>
+                      ✅ Received (add to stock)
+                    </button>
+                    <button onClick={() => setConfirmClear(true)} style={cancelBtn}>🗑 Clear</button>
+                  </div>
+                  <div style={{ fontSize:10, color:"#999", marginTop:6 }}>
+                    💡 "Received" adds ordered qty into stock immediately
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ══════════ HISTORY TABLE ══════════ */}
+          {activeTab==="history" && (
+            <div style={{ overflowX:"auto", padding:"10px 8px 30px" }}>
+              {history.length===0 ? (
+                <div style={{ textAlign:"center", padding:"60px 20px", color:"#AAA" }}>
+                  <div style={{ fontSize:48, marginBottom:12 }}>📜</div>
+                  <div style={{ fontWeight:700, fontSize:16, color:"#888" }}>No history yet</div>
+                  <div style={{ fontSize:13, marginTop:6 }}>Receiving history will appear here.</div>
+                </div>
+              ) : (
+                <div style={{ display:"inline-block", background:"#fff", padding:8, borderRadius:4 }}>
+                  <table style={{ borderCollapse:"collapse", minWidth:300 }}>
+                    <thead>
+                      <tr>
+                        <td colSpan={3} style={{ background:"#C00000", color:"#fff",
+                          textAlign:"center", fontWeight:800, fontSize:13, padding:"6px 8px",
+                          border:"1px solid #aaa" }}>
+                          📜 Receiving History
+                        </td>
+                      </tr>
+                      <tr>
+                        {["Date","Item","Qty received"].map(h=>(
+                          <td key={h} style={{ background:"#F0F0F0", border:"1px solid #ccc",
+                            fontSize:10, fontWeight:700, textAlign:"center", color:"#666",
+                            padding:"4px 8px" }}>{h}</td>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {history.map(h => (
+                        <React.Fragment key={h.id}>
+                          <tr>
+                            <td colSpan={3} style={{ background:"#EDE9FE", fontWeight:800, fontSize:11,
+                              padding:"4px 8px", border:"1px solid #C4B5FD", color:"#6D28D9",
+                              borderLeft:"3px solid #7C3AED" }}>
+                              📦 Received {h.rows.length} items — {fmtDate(h.ts)}
+                            </td>
+                          </tr>
+                          {h.rows.map((r, ri) => (
+                            <tr key={ri} style={{ background:ri%2===0?"#fff":"#F9F9F9" }}>
+                              <td style={{ padding:"3px 8px", border:"1px solid #eee",
+                                fontSize:10, color:"#888", whiteSpace:"nowrap" }}>{fmtDate(h.ts)}</td>
+                              <td style={{ padding:"3px 8px", border:"1px solid #eee",
+                                fontSize:11, fontWeight:700, color:"#1a1a2e" }}>{r.name}</td>
+                              <td style={{ textAlign:"center", padding:"3px 8px", border:"1px solid #eee",
+                                fontSize:11, fontWeight:700, color:"#276749" }}>+{r.qty} {r.unit}</td>
+                            </tr>
+                          ))}
+                          <tr><td colSpan={3} style={{ height:6, border:"none" }}/></tr>
+                        </React.Fragment>
+                      ))}
+                    </tbody>
+                  </table>
+                  <button onClick={() => { setHistory([]); showToast("History cleared"); }}
+                    style={{ ...dangerBtn, marginTop:10, fontSize:12 }}>🗑 Clear all history</button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ══════════ MODALS ══════════ */}
+
+          {editItem && (
+            <EditItemModal item={editItem}
+              onSave={saveEdit} onDelete={deleteItem} onClose={()=>setEditId(null)}/>
+          )}
+
+          {addSec && (
+            <Modal onClose={()=>setAddSec(null)}>
+              <div style={{ fontWeight:700, fontSize:16, marginBottom:14 }}>
+                ➕ Add to {SECTIONS.find(s=>s.id===addSec)?.label}
+              </div>
+              <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+                <input autoFocus style={iStyle} value={newName}
+                  onChange={e=>setNewName(e.target.value)}
+                  onKeyDown={e=>e.key==="Enter"&&addItem()}
+                  placeholder="Item name, e.g. Bok choy"/>
+                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:8 }}>
+                  <div>
+                    <div style={{ fontSize:12, color:"#888", marginBottom:4 }}>หน่วย</div>
+                    <input style={iStyle} value={newUnit} onChange={e=>setNewUnit(e.target.value)} placeholder="กก."/>
+                  </div>
+                  <div>
+                    <div style={{ fontSize:12, color:"#888", marginBottom:4 }}>Stock</div>
+                    <input style={iStyle} type="number" step="0.5" min="0" value={newStock}
+                      onChange={e=>setNewStock(e.target.value)} placeholder="0"/>
+                  </div>
+                  <div>
+                    <div style={{ fontSize:12, color:"#888", marginBottom:4 }}>Min</div>
+                    <input style={iStyle} type="number" step="0.5" min="0" value={newMin}
+                      onChange={e=>setNewMin(e.target.value)} placeholder="1"/>
+                  </div>
+                </div>
+                <div style={{ display:"flex", gap:8, marginTop:4 }}>
+                  <button onClick={()=>setAddSec(null)} style={cancelBtn}>Cancel</button>
+                  <button onClick={addItem}
+                    style={{ ...primaryBtn, background:newName?"#1a1a2e":"#AAA", cursor:newName?"pointer":"default" }}>
+                    Add item
+                  </button>
+                </div>
+              </div>
+            </Modal>
+          )}
+
+          {editTitleOpen && (
+            <Modal onClose={()=>setEditTitleOpen(false)}>
+              <div style={{ fontWeight:700, fontSize:16, marginBottom:14 }}>Edit table title</div>
+              <input autoFocus style={iStyle} value={tempTitle}
+                onChange={e=>setTempTitle(e.target.value)}
+                onKeyDown={e=>{ if(e.key==="Enter"){ setTitle(tempTitle); setEditTitleOpen(false); showToast("Title saved!"); }}}
+                placeholder="e.g. Aunty Katie Stock Week 1"/>
+              <div style={{ display:"flex", gap:8, marginTop:12 }}>
+                <button onClick={()=>setEditTitleOpen(false)} style={cancelBtn}>Cancel</button>
+                <button onClick={()=>{ setTitle(tempTitle); setEditTitleOpen(false); showToast("Title saved!"); }}
+                  style={primaryBtn}>Save</button>
+              </div>
+            </Modal>
+          )}
+
+          {confirmReceive && (
+            <Modal onClose={()=>setConfirmReceive(false)}>
+              <div style={{ fontWeight:700, fontSize:16, marginBottom:10 }}>Confirm receiving stock?</div>
+              <div style={{ fontSize:13, color:"#6B7280", marginBottom:20 }}>
+                This will add all <b>{orderItems.length} items</b> into stock immediately.
+              </div>
+              <div style={{ display:"flex", gap:8 }}>
+                <button onClick={()=>setConfirmReceive(false)} style={cancelBtn}>Cancel</button>
+                <button onClick={receiveOrder} style={{ ...primaryBtn, background:"#276749" }}>✅ Confirm</button>
+              </div>
+            </Modal>
+          )}
+
+          {confirmClear && (
+            <Modal onClose={()=>setConfirmClear(false)}>
+              <div style={{ fontWeight:700, fontSize:16, marginBottom:10 }}>Clear order list?</div>
+              <div style={{ fontSize:13, color:"#6B7280", marginBottom:20 }}>Stock will not be changed.</div>
+              <div style={{ display:"flex", gap:8 }}>
+                <button onClick={()=>setConfirmClear(false)} style={cancelBtn}>Cancel</button>
+                <button onClick={clearOrder} style={{ ...primaryBtn, background:"#EF4444" }}>🗑 Clear</button>
+              </div>
+            </Modal>
+          )}
+
+          {confirmReset && (
+            <Modal onClose={()=>setConfirmReset(false)}>
+              <div style={{ fontWeight:700, fontSize:16, marginBottom:10 }}>Reset all data?</div>
+              <div style={{ fontSize:13, color:"#6B7280", marginBottom:20 }}>
+                All stock data and history will be deleted. This cannot be undone.
+              </div>
+              <div style={{ display:"flex", gap:8 }}>
+                <button onClick={()=>setConfirmReset(false)} style={cancelBtn}>Cancel</button>
+                <button onClick={resetAll} style={{ ...primaryBtn, background:"#EF4444" }}>Reset</button>
+              </div>
+            </Modal>
+          )}
+
+          {/* Share modal — copied popup */}
+          {shareModal && (
+            <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.45)",
+              display:"flex", alignItems:"center", justifyContent:"center", zIndex:500, padding:24 }}
+              onClick={() => setShareModal(false)}>
+              <div style={{ background:"#fff", borderRadius:20, padding:32, maxWidth:340, width:"100%",
+                textAlign:"center", boxShadow:"0 8px 40px rgba(0,0,0,0.2)" }}
+                onClick={e => e.stopPropagation()}>
+                <div style={{ fontSize:48, marginBottom:12 }}>✅</div>
+                <div style={{ fontWeight:800, fontSize:18, marginBottom:8, color:"#1a1a2e" }}>
+                  Order copied!
+                </div>
+                <div style={{ fontSize:14, color:"#555", lineHeight:1.7, marginBottom:24 }}>
+                  Your order list has been copied.<br/>
+                  Open LINE (or any chat app) and press<br/>
+                  <span style={{ background:"#F3F4F6", border:"1px solid #E5E7EB", borderRadius:6,
+                    padding:"2px 10px", fontWeight:800, fontSize:15, fontFamily:"monospace",
+                    color:"#1a1a2e", display:"inline-block", marginTop:6 }}>Ctrl + V</span>
+                  <span style={{ display:"inline-block", marginLeft:8, color:"#888", fontSize:12 }}>(Mac: ⌘V)</span>
+                </div>
+                <button onClick={() => setShareModal(false)}
+                  style={{ padding:"12px 40px", borderRadius:12, border:"none",
+                    background:"#1a1a2e", color:"#fff", fontWeight:700, fontSize:14, cursor:"pointer" }}>
+                  Got it
+                </button>
+              </div>
+            </div>
+          )}
+
+                    {/* Toast — identical to scheduler */}
+          {toast && (
+            <div style={{ position:"fixed", bottom:20, left:"50%", transform:"translateX(-50%)",
+              background: toast.type==="err" ? "#C62828" : "#1a1a2e",
+              color:"#fff", padding:"10px 22px", borderRadius:30, fontSize:13, fontWeight:700,
+              zIndex:999, boxShadow:"0 4px 20px rgba(0,0,0,0.25)", whiteSpace:"nowrap",
+              maxWidth:"calc(100vw - 40px)", overflow:"hidden", textOverflow:"ellipsis" }}>
+              {toast.msg}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+  </script>
+</body>
+</html>
