@@ -371,18 +371,8 @@ function App() {
 
   const handleShare = async () => {
     const text = buildOrderText();
-    // Always copy to clipboard first — works as fallback if share sheet fails
+    // Always copy to clipboard as backup
     try { await navigator.clipboard.writeText(text); } catch(e) {}
-
-    if (navigator.share) {
-      try {
-        await navigator.share({ title:"Order List", text });
-        return; // share sheet opened — clipboard already copied as backup
-      } catch(e) {
-        if (e.name === "AbortError") return; // user cancelled
-      }
-    }
-    // No share API or share failed — show paste instructions
     setShareModal(true);
   };
 
@@ -872,29 +862,43 @@ function App() {
 
       {/* Share copied popup */}
       {shareModal && (
-        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.45)",
-          display:"flex", alignItems:"center", justifyContent:"center", zIndex:500, padding:24 }}
-          onClick={() => setShareModal(false)}>
-          <div style={{ background:"#fff", borderRadius:20, padding:32, maxWidth:340, width:"100%",
-            textAlign:"center", boxShadow:"0 8px 40px rgba(0,0,0,0.2)" }}
-            onClick={e => e.stopPropagation()}>
-            <div style={{ fontSize:48, marginBottom:12 }}>✅</div>
-            <div style={{ fontWeight:800, fontSize:18, marginBottom:8, color:"#1a1a2e" }}>Order copied!</div>
-            <div style={{ fontSize:14, color:"#555", lineHeight:1.8, marginBottom:24 }}>
-              Your order is already copied.<br/>
-              <b>On iPhone:</b> Open LINE → tap the message box → tap <b>Paste</b><br/>
-              <b>On PC:</b> Open LINE → press{" "}
-              <span style={{ background:"#F3F4F6", border:"1px solid #E5E7EB", borderRadius:6,
-                padding:"2px 8px", fontWeight:800, fontSize:13, fontFamily:"monospace",
-                color:"#1a1a2e" }}>Ctrl+V</span>
+        <Modal onClose={() => setShareModal(false)}>
+          <div style={{ textAlign:"center" }}>
+            <div style={{ fontSize:40, marginBottom:8 }}>📋</div>
+            <div style={{ fontWeight:800, fontSize:17, marginBottom:4, color:"#1a1a2e" }}>Send Order List</div>
+            <div style={{ fontSize:12, color:"#888", marginBottom:16 }}>Text copied to clipboard</div>
+
+            {/* LINE deep link — opens app directly with text ready */}
+            <button
+              onClick={() => { window.location.href = "line://msg/text/" + encodeURIComponent(buildOrderText()); }}
+              style={{ width:"100%", padding:"14px", borderRadius:14, border:"none",
+                background:"#06C755", color:"#fff", fontWeight:800, fontSize:16,
+                cursor:"pointer", marginBottom:10, display:"flex",
+                alignItems:"center", justifyContent:"center", gap:10 }}>
+              <span style={{ fontSize:22 }}>💬</span> Open in LINE
+            </button>
+
+            <div style={{ fontSize:11, color:"#aaa", marginBottom:16 }}>
+              Tap above to open LINE with the order pre-loaded
             </div>
+
+            {/* Paste fallback */}
+            <div style={{ background:"#F9F9F9", borderRadius:12, padding:"12px 14px",
+              textAlign:"left", border:"1px solid #eee" }}>
+              <div style={{ fontWeight:700, fontSize:12, color:"#555", marginBottom:6 }}>Or paste manually:</div>
+              <div style={{ fontSize:12, color:"#555", lineHeight:1.8 }}>
+                <b>iPhone:</b> Open LINE → message box → <b>Paste</b><br/>
+                <b>PC:</b> Open LINE → press <code style={{ background:"#eee", padding:"1px 6px", borderRadius:4 }}>Ctrl+V</code>
+              </div>
+            </div>
+
             <button onClick={() => setShareModal(false)}
-              style={{ padding:"12px 40px", borderRadius:12, border:"none",
-                background:"#1a1a2e", color:"#fff", fontWeight:700, fontSize:14, cursor:"pointer" }}>
-              Got it
+              style={{ width:"100%", marginTop:12, padding:"11px", borderRadius:12, border:"1.5px solid #E5E7EB",
+                background:"#fff", color:"#555", fontWeight:600, fontSize:14, cursor:"pointer" }}>
+              Close
             </button>
           </div>
-        </div>
+        </Modal>
       )}
 
       {/* Toast */}
